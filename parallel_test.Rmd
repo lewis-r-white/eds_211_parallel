@@ -23,7 +23,8 @@ r <- raster::raster(rast_fs[1])
 
 plot(r)
 
-df <- as.data.frame(r) %>%
+df <- as.data.frame(r, xy = TRUE) %>%
+  setNames(c('x', 'y', 'z')) %>%
   drop_na() %>%
   mutate(type = case_when(x < 0.1 ~ 'low',
                           x < 0.25 ~ 'medium',
@@ -44,8 +45,8 @@ out_list_loop <- vector('list', length = length(rast_fs)) %>%
 for(f in rast_fs) {
   r <- raster::raster(f)
   
-  df <- as.data.frame(r) %>%
-    setNames('x') %>%
+  df <- as.data.frame(r, xy = TRUE) %>%
+    setNames(c('x', 'y', 'z')) %>%
     drop_na() %>%
     mutate(type = case_when(x < 0.1 ~ 'low',
                             x < 0.25 ~ 'medium',
@@ -71,8 +72,8 @@ out_df_loop <- out_list_loop %>%
 process_rast_file <- function(f) {
   r <- raster::raster(f)
   
-  df <- as.data.frame(r) %>%
-    setNames('x') %>%
+  df <- as.data.frame(r, xy = TRUE) %>%
+    setNames(c('x', 'y', 'z')) %>%
     drop_na() %>%
     mutate(type = case_when(x < 0.1 ~ 'low',
                             x < 0.25 ~ 'medium',
