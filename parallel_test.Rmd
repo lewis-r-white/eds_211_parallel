@@ -1,0 +1,173 @@
+---
+title: "EDS 211 parallel test"
+output: html_document
+date: "2023-02-06"
+---
+
+```{r setup, echo = TRUE, warning = FALSE, message = FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+
+library(tidyverse) ### includes purrr
+library(parallel)
+library(furrr)
+library(raster)
+library(tictoc)
+```
+
+### do a slow thing?
+
+```{r}
+rast_fs <- list.files('data', full.names = TRUE)
+
+r <- raster::raster(rast_fs[1])
+
+plot(r)
+
+df <- as.data.frame(r) %>%
+  drop_na() %>%
+  mutate(type = case_when(x < 0.1 ~ 'low',
+                          x < 0.25 ~ 'medium',
+                          x < 0.5 ~ 'high',
+                          TRUE ~ 'wow'))
+summary_df <- df %>%
+  group_by(type) %>%
+  summarize(n_cells = n())
+```
+
+### in a loop
+
+```{r}
+system.time({
+out_list_loop <- vector('list', length = length(rast_fs)) %>%
+  setNames(rast_fs)
+
+for(f in rast_fs) {
+  r <- raster::raster(f)
+  
+  df <- as.data.frame(r) %>%
+    setNames('x') %>%
+    drop_na() %>%
+    mutate(type = case_when(x < 0.1 ~ 'low',
+                            x < 0.25 ~ 'medium',
+                            x < 0.5 ~ 'high',
+                            TRUE ~ 'wow'))
+  summary_df <- df %>%
+    group_by(type) %>%
+    summarize(n_cells = n(),
+              file = basename(f))
+  
+  out_list_loop[[f]] <- summary_df
+}
+}) ### 20-30 seconds
+
+out_df_loop <- out_list_loop %>%
+  bind_rows()
+
+```
+
+### Create a function
+
+```{r}
+process_rast_file <- function(f) {
+  r <- raster::raster(f)
+  
+  df <- as.data.frame(r) %>%
+    setNames('x') %>%
+    drop_na() %>%
+    mutate(type = case_when(x < 0.1 ~ 'low',
+                            x < 0.25 ~ 'medium',
+                            x < 0.5 ~ 'high',
+                            TRUE ~ 'wow'))
+  summary_df <- df %>%
+    group_by(type) %>%
+    summarize(n_cells = n(),
+              file = basename(f))
+  
+  return(summary_df)
+}
+
+boring <- function(t = 3) {
+  Sys.sleep(t)
+  return(t)
+}
+
+```
+
+### lapply
+
+Iterates over a sequence (vector, list, dataframe columns, etc) and applies some function.  Returns results in a list (very flexible)
+
+```{r}
+ptm <- proc.time()
+out_list_lapply <- lapply(X = rast_fs, FUN = process_rast_file)
+proc.time() - ptm ### elapsed ~ 21-23 sec
+
+out_df_lapply <- bind_rows(out_list_lapply)
+
+t_vec <- 1:10
+ptm <- proc.time()
+t_list <- lapply(t_vec, boring)
+proc.time() - ptm ### elapsed 55 sec
+
+```
+
+### parallel::mclapply
+
+Iterates over a sequence (vector, list, dataframe columns, etc) and applies some function.  Returns results in a list (very flexible).
+
+NOTE: have ONE person in each group run the code, then the next person!
+
+```{r}
+parallel::detectCores() ### 64!
+
+ptm <- proc.time()
+out_list_mclapply <- parallel::mclapply(X = rast_fs, FUN = process_rast_file, mc.cores = 4)
+proc.time() - ptm ### elapsed ~ 10 sec with 4 cores, 3-5 sec with 15 cores
+
+out_df_mclapply <- bind_rows(out_list_mclapply)
+```
+
+``` {r}
+tic()
+t_list <- mclapply(t_vec, FUN = boring, mc.cores = 5)
+toc() ### elapsed ~ 15 sec
+
+tvec_flip <- c(1:5, 10:6)
+tic()
+t_list <- mclapply(tvec_flip, boring, mc.cores = 5)
+toc() ### elapsed ~ 11 sec
+
+```
+
+### purrr::map() version 1
+
+```{r}
+tic()
+out_list_purrr <- purrr::map(rast_fs, process_rast_file)
+toc() ### elapsed ~ 21-23 sec
+
+out_df_purrr <- bind_rows(out_list_purrr)
+
+```
+
+```{r}
+tic()
+out_df_purrr2 <- purrr::map_dfr(rast_fs, process_rast_file)
+toc() ### elapsed ~ 21-23 sec
+```
+
+
+### furrr::future_map() - note version 0.3.1, still well in development
+
+```{r}
+
+plan(multisession, workers = 4)
+tic()
+out_list_furrr <- furrr::future_map(rast_fs, process_rast_file)
+toc() ### elapsed ~ 28 sec
+
+out_df_purrr <- bind_rows(out_list_purrr)
+
+```
+
+
